@@ -25,4 +25,4 @@
 ```
 * [ ] Unlock stuck jobs
 * [ ] Build CLI
-* [ ] Use test-containers
+* [x] Use test-containers
