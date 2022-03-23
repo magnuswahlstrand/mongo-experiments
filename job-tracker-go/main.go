@@ -29,7 +29,7 @@ type Service struct {
 	shutdown func()
 }
 
-func (s *Service) insertJob(ctx context.Context, data bson.M) error {
+func (s *Service) insertJob(ctx context.Context, data bson.M) (primitive.ObjectID, error) {
 	t := time.Now()
 	user := Job{
 		ID:        primitive.NewObjectIDFromTimestamp(t),
@@ -38,20 +38,39 @@ func (s *Service) insertJob(ctx context.Context, data bson.M) error {
 		UpdatedAt: t,
 		Data:      data,
 	}
-	_, err := s.db.InsertOne(ctx, user)
+	res, err := s.db.InsertOne(ctx, user)
+
 	if err != nil {
-		return err
+		return primitive.ObjectID{}, err
 	}
-	return nil
+	return res.InsertedID.(primitive.ObjectID), nil
 }
 
-func (s *Service) listJobs(ctx context.Context) ([]Job, error) {
+func (s *Service) listJobs(ctx context.Context, filter bson.M) ([]Job, error) {
 	var batch []Job
-	if err := s.db.Find(ctx, bson.M{}).All(&batch); err != nil {
+	if err := s.db.Find(ctx, filter).All(&batch); err != nil {
 		return nil, err
 	}
 
 	return batch, nil
+}
+
+func (s *Service) getAndLockJob(ctx context.Context, id primitive.ObjectID) (*Job, error) {
+	filter := bson.M{"_id": id, "locked": false}
+	change := qmgo.Change{
+		Update: bson.M{
+			"$set": bson.M{
+				"locked": true,
+			},
+		},
+		ReturnNew: true,
+	}
+
+	var job Job
+	if err := s.db.Find(ctx, filter).Apply(change, &job); err != nil {
+		return nil, err
+	}
+	return &job, nil
 }
 
 func NewService(ctx context.Context, uri string) Service {
@@ -86,7 +105,7 @@ func main() {
 	service := NewService(ctx, uri)
 	defer service.shutdown()
 
-	users, err := service.listJobs(ctx)
+	users, err := service.listJobs(ctx, bson.M{})
 	if err != nil {
 		log.Println("failed to get users", err)
 		return
